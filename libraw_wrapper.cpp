@@ -21,6 +21,7 @@ public:
 	~WASMLibRaw() {
 		if (processor_) {
 			cleanupParamsStrings();
+            processor_->recycle();
 			delete processor_;
 			processor_ = nullptr;
 		}
@@ -30,12 +31,12 @@ public:
 		if (!processor_) {
 			throw std::runtime_error("LibRaw not initialized");
 		}
-
-		// 1) Convert the JS buffer (Uint8Array) to a C++ std::vector<uint8_t>.
-		std::vector<uint8_t> buffer = toNativeVector(jsBuffer);
+        // Release previous values, if any
+        processor_->recycle();
 
 		applySettings(settings);
 
+        buffer = toNativeVector(jsBuffer);
 		int ret = processor_->open_buffer((void*)buffer.data(), buffer.size());
 		if (ret != LIBRAW_SUCCESS) {
 			throw std::runtime_error("LibRaw: open_buffer() failed with code " + std::to_string(ret));
@@ -908,59 +909,43 @@ public:
 		resultObj.set("width",  out->width);
 		resultObj.set("colors", out->colors);
 		resultObj.set("bits",   out->bits);
+        resultObj.set("dataSize", (unsigned int)out->data_size);
+        resultObj.set("data", toJSTypedArray(out->bits, out->data_size, out->data));
 
-		// Calculate total pixels and total bytes
-		size_t pixelCount = static_cast<size_t>(out->height) *
-							static_cast<size_t>(out->width)  *
-							static_cast<size_t>(out->colors);
-		size_t bytesPerSample = out->bits / 8;
-		size_t totalBytes = pixelCount * bytesPerSample;
-
-		resultObj.set("dataSize", (unsigned int)out->data_size);
-
-		// Convert C++ pointer data into a new JS TypedArray, then free LibRaw memory.
-		// We do this to avoid referencing freed memory.
-
-		val jsData = val::undefined();
-
-		if (out->bits == 8) {
-			// We'll create a new Uint8Array of length totalBytes
-			// and copy the data from out->data
-			val typedArrayCtor = val::global("Uint8Array");
-			val typedArray = typedArrayCtor.new_(val((unsigned)totalBytes));  // allocate new JS array
-			// typed_memory_view(...) references the existing memory from out->data
-			val memView = val(typed_memory_view(totalBytes, (uint8_t*)out->data));
-			// Copy from memView into typedArray
-			typedArray.call<void>("set", memView);
-			jsData = typedArray;
-		}
-		else if (out->bits == 16) {
-			// We'll create a new Uint16Array of length pixelCount
-			unsigned length = (unsigned)pixelCount; // # of 16-bit samples
-			val typedArrayCtor = val::global("Uint16Array");
-			val typedArray = typedArrayCtor.new_(val(length));
-			// typed_memory_view(...) references out->data as an array of uint16
-			val memView = val(typed_memory_view(length, (uint16_t*)out->data));
-			typedArray.call<void>("set", memView);
-			jsData = typedArray;
-		}
-		else {
-			// Unknown bit depth; free memory and throw
-			processor_->dcraw_clear_mem(out);
-			throw std::runtime_error("Unsupported bit depth");
-		}
-
-		// Now we can safely free the processed image data
 		processor_->dcraw_clear_mem(out);
-
-		// Put the typed array into the result object
-		resultObj.set("data", jsData);
 
 		return resultObj;
 	}
+    
+    val thumbnailData() {
+        // Call LibRaw's unpack_thumb function
+        int ret = processor_->unpack_thumb();
+        if (ret != LIBRAW_SUCCESS) {
+            throw std::runtime_error(std::string("Failed to unpack thumbnail: ") + libraw_strerror(ret));
+        }
+
+        // Get thumbnail data structure
+        libraw_thumbnail_t& thumb = processor_->imgdata.thumbnail;
+        
+        if (!thumb.thumb)
+            return val::undefined();
+
+        val resultObj = val::object();
+        resultObj.set("data", toJSTypedArray(8, thumb.tlength, (uint8_t*)thumb.thumb));
+        resultObj.set("height", thumb.theight);
+        resultObj.set("width", thumb.twidth);
+        resultObj.set("format", thumb.tformat == LIBRAW_THUMBNAIL_JPEG
+                                    ? "jpeg"
+                                    : (thumb.tformat == LIBRAW_THUMBNAIL_BITMAP
+                                        ? "bitmap"
+                                        : (thumb.tformat == LIBRAW_THUMBNAIL_BITMAP16 ? "bitmap16" : "unknown")));
+        
+        return resultObj;
+    }
 
 private:
 	LibRaw* processor_ = nullptr;
+    std::vector<uint8_t> buffer;
 	bool isUnpacked = false;
 
 	void applySettings(const val& settings) {
@@ -1134,19 +1119,46 @@ private:
 		}
 	}
 	// Convert a JS Uint8Array to a std::vector<uint8_t>
-	std::vector<uint8_t> toNativeVector(const val &jsBuffer) {
-		// Check for null/undefined
-		if (jsBuffer.isNull() || jsBuffer.isUndefined()) {
-			return {};
-		}
-		// Expecting a Uint8Array or something with a "length" property
-		size_t length = jsBuffer["length"].as<size_t>();
-		std::vector<uint8_t> buf(length);
-		for (size_t i = 0; i < length; i++) {
-			buf[i] = jsBuffer[i].as<uint8_t>();
-		}
-		return buf;
+	std::vector<uint8_t> toNativeVector(const val &jsBufLike) {
+        const val Uint8Array = val::global("Uint8Array");
+        const val ArrayBuffer = val::global("ArrayBuffer");
+
+        // Normalize to a Uint8Array, whether the input is ArrayBuffer or any ArrayBufferView
+        val u8 = jsBufLike.instanceof(Uint8Array)
+                 ? jsBufLike
+                 : (jsBufLike.instanceof(ArrayBuffer)
+                      ? Uint8Array.new_(jsBufLike)
+                      : Uint8Array.new_(jsBufLike["buffer"],
+                                        jsBufLike["byteOffset"],
+                                        jsBufLike["byteLength"]));
+
+        const size_t n = u8["byteLength"].as<size_t>();
+        std::vector<uint8_t> out(n);
+
+        // Create a Uint8Array view into WASM memory and copy JS -> WASM in one go
+        val wasmView = val(emscripten::typed_memory_view(out.size(), out.data()));
+        wasmView.call<void>("set", u8);   // single memcpy under the hood
+
+        return out;
 	}
+    
+    val toJSTypedArray(size_t bits, size_t data_size, uint8_t *data) {
+        if (bits == 16) {
+            unsigned length = (unsigned)data_size / 2;
+            val typedArrayCtor = val::global("Uint16Array");
+            val typedArray = typedArrayCtor.new_(val(length));
+            val memView = val(typed_memory_view(length, (uint16_t*)data));
+            typedArray.call<void>("set", memView);
+            return typedArray;
+        } else {
+            val typedArrayCtor = val::global("Uint8Array");
+            val typedArray = typedArrayCtor.new_(val((unsigned)data_size));
+            val memView = val(typed_memory_view(data_size, (uint8_t*)data));
+            typedArray.call<void>("set", memView);
+            return typedArray;
+        }
+    }
+    
 	void setStringMember(char*& dest, const std::string& value) {
 		if (dest) {
 			delete[] dest;
@@ -1186,5 +1198,6 @@ EMSCRIPTEN_BINDINGS(libraw_module) {
 		.constructor<>()
 		.function("open", &WASMLibRaw::open)
 		.function("metadata", &WASMLibRaw::metadata)
-		.function("imageData", &WASMLibRaw::imageData);
+        .function("imageData", &WASMLibRaw::imageData)
+		.function("thumbnailData", &WASMLibRaw::thumbnailData);
 }
