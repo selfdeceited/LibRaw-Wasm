@@ -16,6 +16,7 @@ import { promises as fs } from "fs";
 			format: 'esm', // Output format (ES Module)
 		});
 		await fs.copyFile('./libraw.wasm', './dist/libraw.wasm');
+		await fs.copyFile('./index.d.ts', './dist/index.d.ts');
 		console.log('Build successful!');
 	} catch (error) {
 		console.error('Build failed:', error);

@@ -1,6 +1,6 @@
 /* -*- C++ -*-
  * File: libraw.h
- * Copyright 2008-2024 LibRaw LLC (info@libraw.org)
+ * Copyright 2008-2025 LibRaw LLC (info@libraw.org)
  * Created: Sat Mar  8, 2008
  *
  * LibRaw C++ interface
@@ -130,6 +130,9 @@ extern "C"
   DllDef void libraw_set_exifparser_handler(libraw_data_t *,
                                             exif_parser_callback cb,
                                             void *datap);
+  DllDef void libraw_set_makernotes_handler(libraw_data_t *,
+                                            exif_parser_callback cb,
+                                            void *datap);
   DllDef void libraw_set_dataerror_handler(libraw_data_t *, data_callback func,
                                            void *datap);
   DllDef void libraw_set_progress_handler(libraw_data_t *, progress_callback cb,
@@ -232,6 +235,11 @@ public:
     callbacks.exifparser_data = data;
     callbacks.exif_cb = cb;
   }
+  void set_makernotes_handler(exif_parser_callback cb, void *data)
+  {
+    callbacks.makernotesparser_data = data;
+    callbacks.makernotes_cb = cb;
+  }
   void set_dataerror_handler(data_callback func, void *data)
   {
     callbacks.datacb_data = data;
@@ -248,6 +256,10 @@ public:
 
   void convertFloatToInt(float dmin = 4096.f, float dmax = 32767.f,
                          float dtarget = 16383.f);
+
+  /* Make/Model simplification */
+  static int simplify_make_model(unsigned *_maker_index, char *_make, unsigned _make_buf_size, char *_model, unsigned _model_buf_size);
+
   /* helpers */
   static unsigned capabilities();
   static const char *version();
@@ -377,6 +389,7 @@ protected:
   /* Panasonic Compression 8 parallel decoder stubs*/
   virtual void pana8_decode_loop(void*);
   int pana8_decode_strip(void*, int); // return: 0 if OK, non-zero on error
+
   int FCF(int row, int col)
   {
     int rr, cc;
@@ -478,6 +491,7 @@ protected:
   void *_rawspeed3_handle;
   void fix_after_rawspeed(int bl);
   int try_rawspeed(); /* returns LIBRAW_SUCCESS on success */
+  
   /* Fast cancel flag */
   long _exitflag;
 
