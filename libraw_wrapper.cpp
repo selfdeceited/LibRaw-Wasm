@@ -84,7 +84,7 @@ public:
 		meta.set("thumb_height", processor_->imgdata.thumbnail.theight);
 		// Cast enum to int so we don't need to register it
 		meta.set("thumb_format",
-				 static_cast<int>(processor_->imgdata.thumbnail.tformat));
+				static_cast<int>(processor_->imgdata.thumbnail.tformat));
 
 		if(fullOutput) {
 			// --------------------------------------------------------------------
@@ -918,28 +918,32 @@ public:
 	}
     
     val thumbnailData() {
+		if (!processor_) return val::undefined();
+
         // Call LibRaw's unpack_thumb function
         int ret = processor_->unpack_thumb();
-        if (ret != LIBRAW_SUCCESS) {
-            throw std::runtime_error(std::string("Failed to unpack thumbnail: ") + libraw_strerror(ret));
-        }
+
+        if (ret != LIBRAW_SUCCESS) return val::undefined();
 
         // Get thumbnail data structure
-        libraw_thumbnail_t& thumb = processor_->imgdata.thumbnail;
+        libraw_processed_image_t *img = processor_->dcraw_make_mem_thumb();
         
-        if (!thumb.thumb)
-            return val::undefined();
+        if (!img) return val::undefined();
 
         val resultObj = val::object();
-        resultObj.set("data", toJSTypedArray(8, thumb.tlength, (uint8_t*)thumb.thumb));
-        resultObj.set("height", thumb.theight);
-        resultObj.set("width", thumb.twidth);
-        resultObj.set("format", thumb.tformat == LIBRAW_THUMBNAIL_JPEG
-                                    ? "jpeg"
-                                    : (thumb.tformat == LIBRAW_THUMBNAIL_BITMAP
-                                        ? "bitmap"
-                                        : (thumb.tformat == LIBRAW_THUMBNAIL_BITMAP16 ? "bitmap16" : "unknown")));
+
+        resultObj.set("data", toJSTypedArray(8, img->data_size, img->data));
+        resultObj.set("width", img->width);
+        resultObj.set("height", img->height);
+		
+        std::string formatStr = "unknown";
+        if (img->type == LIBRAW_IMAGE_JPEG) formatStr = "jpeg";
+        else if (img->type == LIBRAW_IMAGE_BITMAP) formatStr = "bitmap";
         
+        resultObj.set("format", formatStr);
+        
+        LibRaw::dcraw_clear_mem(img);
+
         return resultObj;
     }
 

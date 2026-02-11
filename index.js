@@ -70,4 +70,11 @@ export default class LibRaw {
 	async imageData() {
 		return await this.runFn('imageData');
 	}
+
+	/**
+     * Retrieve the embedded JPEG preview (Fast extraction)
+     */
+    async thumbnailData() {
+        return await this.runFn('thumbnailData');
+    }
 }
