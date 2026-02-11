@@ -74,9 +74,17 @@ export interface RawImageData {
   height: number;
 }
 
+export interface ThumbnailImageData {
+  data: Uint8Array; 
+  width: number; 
+  height: number; 
+  format: 'jpeg' | 'bitmap' | 'unknown' 
+}
+
 declare class LibRaw {
   open(data: Uint8Array, options?: LibRawOptions): Promise<void>;
   metadata(fullOutput?: boolean): Promise<unknown>;
   imageData(): Promise<RawImageData>;
+  thumbnailData(): Promise<ThumbnailImageData | undefined>;
 }
 export default LibRaw;
