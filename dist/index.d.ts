@@ -63,6 +63,15 @@ export interface Metadata {
   timestamp: string | number | Date;
   top_margin: number;
   width: number;
+  gps_data: GpsData
+}
+
+export interface GpsData {
+  /** the N <-> S coordinates: [deg, min, sec]*/
+  latitude: [number, number, number];
+  /** the W <-> E coordinates:  [deg, min, sec]*/
+  longitude: [number, number, number];
+  altitude: number;
 }
 
 export interface RawImageData {

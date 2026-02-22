@@ -79,6 +79,24 @@ public:
 		meta.set("desc",	   std::string(processor_->imgdata.other.desc));
 		meta.set("artist",	 std::string(processor_->imgdata.other.artist));
 
+		// GPS data
+		val gpsData = val::object();
+
+		val latitudeArr = val::array();
+		for (int i = 0; i < 3; i++) {
+			latitudeArr.set(i, processor_->imgdata.other.parsed_gps.latitude[i]);
+		}
+		gpsData.set("latitude", latitudeArr);
+
+		val longitudeArr = val::array();
+		for (int i = 0; i < 3; i++) {
+			longitudeArr.set(i, processor_->imgdata.other.parsed_gps.longitude[i]);
+		}
+		gpsData.set("longitude", longitudeArr);
+		gpsData.set("altitude", processor_->imgdata.other.parsed_gps.altitude);
+			
+		meta.set("gps_data", gpsData);
+
 		// Thumbnail info
 		meta.set("thumb_width",  processor_->imgdata.thumbnail.twidth);
 		meta.set("thumb_height", processor_->imgdata.thumbnail.theight);

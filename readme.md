@@ -86,3 +86,8 @@ console.log('Image data length:', imageData.length);
 # Additional Notes
 - **Performance:** Decoding large RAW files in the browser can be CPU-intensive.
 - **Memory:** WebAssembly modules can allocate a significant amount of memory. Check your environment’s limits if you work with very large files.
+
+## Local development
+ - If you're making changes in the CPP wrapper, launch `compileLibraw.sh`
+ - If you're launching it on MacOS, make sure that emscripten is installed (e.g. `brew install emscripten`) + build dependencies are insalled (e.g. `brew install autoconf automake libtool`)
+ - Don't forget to run `npm build` for esbuild installation!
